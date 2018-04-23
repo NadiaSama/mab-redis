@@ -11,7 +11,7 @@ typedef struct policy_s policy_t;
 
 struct arm_s{
     uint64_t    count;
-    double      value;
+    double      reward;
     void        *choice;
 };
 typedef struct arm_s arm_t;
@@ -19,24 +19,42 @@ typedef struct arm_s arm_t;
 struct multi_arm_s {
     arm_t       *arms;
     size_t      len;
-    policy_t    *policy;
+    uint64_t    total_count;
+    policy_t    policy;
 };
 
-typedef void *  (*policy_choice)(multi_arm_t *, int *idx);
-typedef int     (*policy_reward)(multi_arm_t *, int idx, double reward);
-struct policy_s {
-    const char      *name;
+typedef void *  (*policy_new)();
+typedef void    (*policy_free)(policy_t *);
+typedef void *  (*policy_choice)(policy_t *, multi_arm_t *, int *idx);
+typedef int     (*policy_reward)(policy_t *， multi_arm_t *, int idx, double reward);
+
+struct policy_op_s{
+    policy_new      new;
+    policy_free     free;
     policy_choice   choice;
     policy_reward   reward;
 };
+typedef struct policy_op_s policy_op_t;
 
-static policy_ucb1_choice(multi_arm_t *arm, int *idx);
-static policy_ucb1_reward(multi_arm_t *arm, int idx, double);
+struct policy_s {
+    policy_op_t *op;
+    void        *data;
+};
+
+static void * policy_ucb1_new();
+static void * policy_ucb1_choice(policy_t *, multi_arm_t *mab, int *idx);
+static int policy_ucb1_reward(policy_t *, multi_arm_t *mab, int idx, double);
 static polic_t policy_ucb1 = {"ucb1", policy_ucb1_choice, policy_ucb1_reward};
 
-static policy_t policies[] = {
-    policy_ucb1
+struct policy_elem_t {
+    const char      *name;
+    policy_op_t     *op;
 };
+
+static policy_elem_t policies[] = {
+    {"ucb1", policy_ucb1}
+};
+static int policy_init(const char *, policy_t *dst);
 
 static malloc_ptr  _malloc = malloc;
 static free_ptr    _free = free;
@@ -75,19 +93,14 @@ multi_arm_new(const char *policy, choice_t *choices, size_t len)
     int         i = 0;
     for(i = 0; i < len; i++){
         ret->arms[i].count = 0;
-        ret->arms[i].value = choices[i].value;
+        ret->arms[i].reward = 0.0;
         ret->arms[i].choice = choices[i].choice;
     }
     ret->len = len;
 
-    for(i = 0; i < sizeof(policies)/sizeof(polies[0]); i++){
-        if(strcmp(policies[i].name, policy) == 0){
-            ret->policy = policies + i;
-            return ret;
-        }
+    if(policy_init(policy, &ret->policy) == 0){
+        return ret;
     }
-
-    log_error("invalid policy name %s", policy);
 
     _free(ret->arms);
     _free(ret);
@@ -102,13 +115,47 @@ multi_arm_free(multi_arm_t *arm)
 }
 
 void *
-multi_arm_choice(multi_arm_t *arm, int *idx)
+multi_arm_choice(multi_arm_t *mab, int *idx)
 {
-    return arm->policy->choice(arm, idx);
+    void * ret = mab->policy.op->choice(mab->policy, mab, idx);
+    mab->total_count++;
+
+    return ret;
 }
 
 int
-multi_arm_reward(multi_arm_t *arm, int idx, double reward)
+multi_arm_reward(multi_arm_t *mab, int idx, double reward)
 {
-    return arm->policy->reward(arm, idx, reward);
+    return mab->policy.op->reward(mab->policy, mab, idx, reward);
+}
+
+static int
+policy_init(const char *policy, policy_t *dst)
+{
+    policy_t    *policy = NULL;
+    int         i = 0;
+
+    for(i = 0; i < sizeof(policies)/sizeof(polies[0]); i++){
+        if(strcmp(policies[i].name, policy) == 0){
+            dst->op = policies[i].op;
+            dst->data = policies[i].op->new();
+            return 0;
+        }
+    }
+
+    log_error("invalid policy name %s", policy);
+    return 1;
+}
+
+
+static void *
+policy_ucb1_choice(policy_t *policy, multi_arm_t *ma, int *idx)
+{
+    int     i;
+    for(i = 0; i < ma->len; i++){
+        if(ma->arms[i].count == 0){
+            *idx = i;
+            return ma->arms[i].choice;
+        }
+    }
 }
