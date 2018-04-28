@@ -35,7 +35,10 @@ static int mabTypeChoice_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **,
         int);
 static int mabTypeReward_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **,
         int);
+static int mabTypeConfig_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **,
+        int);
 
+static RedisModuleKey * mabType_OpenKey(RedisModuleCtx *ctx, RedisModuleString *);
 
 static mab_type_obj_t * mab_type_obj_new(const char *type,
         void **choices, int choice_num, int rdb_load);
@@ -82,6 +85,11 @@ RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
                 "write fast deny-oom", 1, 1, 1) == REDISMODULE_ERR){
         return REDISMODULE_ERR;
     }
+
+    if(RedisModule_CreateCommand(ctx, "mab.config", mabTypeConfig_RedisCommand,
+                "write fast", 1, 1, 1) == REDISMODULE_ERR){
+        return REDISMODULE_ERR;
+    }
     
     return REDISMODULE_OK;
 }
@@ -116,16 +124,12 @@ mabTypeSet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *argv[], int argc
         return RedisModule_WrongArity(ctx);
     }
 
-    RedisModuleKey  *key = RedisModule_OpenKey(ctx, argv[1],
-            REDISMODULE_READ|REDISMODULE_WRITE);
-
-    int type = RedisModule_KeyType(key);
-    if(type != REDISMODULE_KEYTYPE_EMPTY){
-        return RedisModule_ReplyWithError(ctx, "ERR key already exist");
+    RedisModuleKey  *key = mabType_OpenKey(ctx, argv[1]);
+    if(key == NULL){
+        return REDISMODULE_OK;
     }
 
     size_t  l;
-
     mab_type_obj_t    *mabobj = mab_type_obj_new(RedisModule_StringDMA(argv + 2,
                 &l, REDISMODULE_READ), argv + 4, (int)choice_num, 0);
 
@@ -152,13 +156,9 @@ mabTypeChoice_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         return RedisModule_WrongArity(ctx);
     }
 
-    RedisModuleKey  *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ);
+    RedisModuleKey  *key = mabType_OpenKey(ctx, argv[1]);
     if(key == NULL){
-        return RedisModule_ReplyWithError(ctx, MABREDIS_ERR_NOTEXISTS);
-    }
-
-    if(RedisModule_ModuleTypeGetType(key) != mabType){
-        return RedisModule_ReplyWithError(ctx, REDISMODULE_ERRORMSG_WRONGTYPE);
+        return REDISMODULE_OK;
     }
 
     mab_type_obj_t  *mabobj = RedisModule_ModuleTypeGetValue(key);
@@ -202,13 +202,9 @@ mabTypeReward_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                 "ERR invalid reward value must be double");
     }
 
-    RedisModule_KeyType *key = RedisModule_OpenKey(argv[1], REDISMODULE_READ);
+    RedisModuleKey  *key = mabType_OpenKey(ctx, argv[1]);
     if(key == NULL){
-        return RedisModule_ReplyWithError(ctx, MABREDIS_ERR_NOTEXISTS);
-    }
-
-    if(RedisModule_ModuleTypeGetType(key) != mabType){
-        return RedisModule_ReplyWithError(ctx, REDISMODULE_ERRORMSG_WRONGTYPE);
+        return REDISMODULE_OK;
     }
 
     mab_type_obj_t  *mabobj = RedisModule_ModuleTypeGetValue(key);
@@ -220,6 +216,53 @@ mabTypeReward_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
 
     RedisModule_ReplyWithLongLong(ctx, 0);
     return REDISMODULE_OK;
+}
+
+
+/*
+ * reconfig specific bandit arm count reward value. used by redis aof
+ *
+ * command:
+ * mab.config $key $arm_idx1 $count1 $reward1 ....
+ *
+ * return:
+ * 0
+ */
+static int
+mabTypeConfig_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
+{
+    RedisModule_AutoMemory(ctx);
+
+    if(argc - 2 % 3 != 0){
+        return RedisModule_WrongArity(ctx);
+    }
+
+    RedisModuleKey  *key = mabType_OpenKey(ctx, argv[1]);
+    if(key == NULL){
+        return REDISMODULE_OK;
+    }
+
+
+    int     i;
+    for(i = 0; i < argc;){
+    }
+}
+
+
+static RedisModuleKey *
+mabType_OpenKey(RedisModuleCtx *ctx, RedisModuleString *key)
+{
+    RedisModule_KeyType *ret = RedisModule_OpenKey(key, REDISMODULE_READ);
+    if(ret == NULL){
+        RedisModule_ReplyWithError(ctx, MABREDIS_ERR_NOTEXISTS);
+        return NULL;
+    }
+
+    if(RedisModule_ModuleTypeGetType(ret) != mabType){
+        RedisModule_ReplyWithError(ctx, REDISMODULE_ERRORMSG_WRONGTYPE);
+        return NULL;
+    }
+    return ret;
 }
 
 
@@ -323,6 +366,10 @@ mabTypeRDBLoad(RedisModuleIO *rdb, int encv)
     //load arms->len
     RedisModule_LoadUnsigned(rdb, &l);
     if(l != len){
+        for(i = 0; i < len; i++){
+            RedisModule_Free(strs[i]);
+            RedisModule_Free(strs);
+        }
         return NULL;
     }
 
