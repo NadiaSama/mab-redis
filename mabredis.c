@@ -337,3 +337,56 @@ mabTypeRDBLoad(RedisModuleIO *rdb, int encv)
 
     return mabobj;
 }
+
+static void
+mabTypeFree(void *value)
+{
+    mab_type_obj_free((mab_type_obj_t *)value);
+}
+
+static void
+mabTypeDigest(RedisModuleDigest *md, void *value)
+{
+    mab_type_obj_t  *mabobj = (mab_type_obj_t *)value;
+    int             i;
+
+    for(i = 0; i < mabobj->choice_num; i++){
+        RedisModule_DigestAddStringBuffer(md, mabobj->choices[i].data, mabobj->choices[i].len);
+    }
+    RedisModule_DigestAddLongLong(md, mabobj->choice_num);
+
+    multi_arm_t     *ma = mabobj->ma;
+    for(i = 0; i < ma->len; i++){
+        RedisModule_DigestAddLongLong(md, ma->arms[i].count);
+    }
+    RedisModule_DigestAddLongLong(md, ma->len);
+
+    RedisModule_DigestAddLongLong(md, ma->total_count);
+
+    RedisModule_DigestEndSequence(md);
+}
+
+
+static size_t
+mabTypeMemUsage(const void *value)
+{
+    mab_type_obj_t  *mabobj = (mab_type_obj_t *)value;
+    multi_arm_t     *ma = mabobj->ma;
+    size_t          ret = 0;
+    int             i;
+
+    //size of choices;
+    for(i = 0; i < mabobj->choice_num; i++){
+        ret += sizeof(sstr_t) + mabobj->choices[i].len;
+    }
+
+    //size of ma
+    for(i = 0; i < ma->len; i++){
+        ret += sizeof(ma->arms[i])
+    }
+    ret += sizeof(*ma);
+
+    ret += sizeof(*mabobj);
+
+    return ret;
+}
