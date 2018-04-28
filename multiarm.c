@@ -7,9 +7,6 @@
 #include "multiarm.h"
 #include "log.h"
 
-struct policy_s;
-typedef struct policy_s policy_t;
-
 typedef void *  (*policy_new)();
 typedef void    (*policy_free)(policy_t *);
 typedef void *  (*policy_choice)(policy_t *, multi_arm_t *, int *idx);
@@ -20,26 +17,6 @@ struct policy_op_s{
     policy_free     free;
     policy_choice   choice;
     policy_reward   reward;
-};
-typedef struct policy_op_s policy_op_t;
-
-struct policy_s {
-    policy_op_t *op;
-    void        *data;
-};
-
-struct arm_s{
-    uint64_t    count;
-    double      reward;
-    void        *choice;
-};
-typedef struct arm_s arm_t;
-
-struct multi_arm_s {
-    arm_t       *arms;
-    size_t      len;
-    uint64_t    total_count;
-    policy_t    policy;
 };
 
 static void * policy_ucb1_choice(policy_t *, multi_arm_t *mab, int *idx);
@@ -124,12 +101,19 @@ multi_arm_choice(multi_arm_t *mab, int *idx)
     return mab->policy.op->choice(&mab->policy, mab, idx);
 }
 
-void
+
+int
 multi_arm_reward(multi_arm_t *mab, int idx, double reward)
 {
+    if(idx > mab->len - 1){
+        return 1;
+    }
+
     mab->policy.op->reward(&mab->policy, mab, idx, reward);
     mab->total_count++;
+    return 0;
 }
+
 
 int
 multi_arm_stat_json(multi_arm_t *ma, char *obuf, size_t maxlen)
@@ -173,6 +157,7 @@ policy_init(const char *policy, policy_t *dst)
     for(i = 0; i < sizeof(policies)/sizeof(policies[0]); i++){
         if(strcmp(policies[i].name, policy) == 0){
             dst->op = policies[i].op;
+            dst->name = policies[i].name;
             if(policies[i].op->new == NULL){
                 dst->data = NULL;
             }else{
