@@ -4,8 +4,9 @@
 #define MABREDIS_ENCODING_VERSION   0
 #define MABREDIS_METHOD_VERSION     1
 #define MABREDIS_TYPE_NAME          "mab-nadia"
+#define MABREDIS_STATBUF_SIZE       1024
+#define MABREDIS_MAXCHOICE_NUM      64
 
-#define MABREDIS_ERR_NOTEXISTS      "ERR mab key not exists"
 static RedisModuleType *mabType;
 
 struct sstr_s{
@@ -37,10 +38,11 @@ static int mabTypeReward_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **,
         int);
 static int mabTypeConfig_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **,
         int);
-
+static int mabTypeStatJson_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **,
+        int );
 static RedisModuleKey * mabType_OpenKey(RedisModuleCtx *ctx, RedisModuleString *);
 
-static mab_type_obj_t * mab_type_obj_new(const char *type,
+static mab_type_obj_t * mab_type_obj_new(const char *type, size_t type_len,
         void **choices, int choice_num, int rdb_load);
 
 static void mab_type_obj_free(mab_type_obj_t *);
@@ -90,6 +92,11 @@ RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
                 "write fast", 1, 1, 1) == REDISMODULE_ERR){
         return REDISMODULE_ERR;
     }
+
+    if(RedisModule_CreateCommand(ctx, "mab.statjson", mabTypeStatJson_RedisCommand,
+                "readonly", 1, 1, ,1) == REDISMODULE_ERR){
+        return REDISMODULE_ERR;
+    }
     
     return REDISMODULE_OK;
 }
@@ -119,6 +126,9 @@ mabTypeSet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *argv[], int argc
         return RedisModule_ReplyWithError(ctx,
                 "ERR choice number must be a interger");
     }
+    if(choice_num > MABREDIS_MAXCHOICE_NUM){
+        return RedisModule_ReplyWithError(ctx, "choice_num too big");
+    }
 
     if(choice_num != argc - 4){
         return RedisModule_WrongArity(ctx);
@@ -129,9 +139,10 @@ mabTypeSet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *argv[], int argc
         return REDISMODULE_OK;
     }
 
-    size_t  l;
-    mab_type_obj_t    *mabobj = mab_type_obj_new(RedisModule_StringDMA(argv + 2,
-                &l, REDISMODULE_READ), argv + 4, (int)choice_num, 0);
+    size_t      l;
+    const char  *type = RedisModule_StringDMA(argv[2], &l, REDISMODULE_READ);
+
+    mab_type_obj_t    *mabobj = mab_type_obj_new(type, l, (void **)argv + 4, (int)choice_num, 0);
 
     RedisModule_ModuleTypeSetValue(key, mabType, mabobj);
     RedisModule_ReplyWithLongLong(key, choice_num);
@@ -242,19 +253,93 @@ mabTypeConfig_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int ar
         return REDISMODULE_OK;
     }
 
+    mab_obj_type_t  *mabobj = RedisModule_ModuleTypeGetValue(key);
+    size_t          arm_len = mabobj->choice_num;
 
-    int     i;
-    for(i = 0; i < argc;){
+    long long       tmp1;
+    double          tmp2;
+    int             i;
+    for(i = 2; i < argc;){
+        //for $arm_idx
+        if(RedisModule_StringToLongLong(argv[i++], &tmp1) != REDISMODULE_OK){
+            return RedisModule_ReplyWithError(ctx, "ERR expect a integer for arm idx");
+        }
+        if(tmp1 < 0 || tmp1 >= arm_len){
+            return RedisModule_ReplyWithError(ctx, "ERR invalid idx value");
+        }
+
+        //for $count
+        if(RedisModule_StringToLongLong(argv[i++], &tmp1) != REDISMODULE_OK){
+            return RedisModule_ReplyWithError(ctx, "ERR expect a integer for count");
+        }
+        if(tmp1 < 0){
+            return RedisModule_ReplyWithError(ctx, "ERR invalid count value");
+        }
+
+        //for reward
+        if(RedisModule_StringToDouble(argv[i++], &tmp2) != REDISMODULE_OK){
+            return RedisModule_ReplyWithError(ctx, "ERR expect a double for reward");
+        }
+        if(tmp2 < 0){
+            return RedisModule_ReplyWithError(ctx, "ERR invalid reward value");
+        }
     }
+
+
+    arm_t   *arm;
+    for(i = 2; i < argc;){
+        //for $arm_idx
+        RedisModule_StringToLongLong(argv[i++], &tmp1);
+        arm = mabobj->ma->arms + tmp1;
+
+        RedisModule_StringToLongLong(argv[i++], &tmp1);
+        arm->count = tmp1;
+
+        RedisModule_StringToDouble(argv[i++], &tmp2);
+        arm->reward = tmp2;
+    }
+
+    return REDISMODULE_OK;
 }
 
+
+/*
+ * command:
+ * mab.statjson $key
+ *
+ * return:
+ * a json string
+ */
+static int
+mabTypeStatJson_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
+{
+    RedisModule_AutoMemory(ctx);
+
+    if(argc != 2){
+        return RedisModule_WrongArity(ctx);
+    }
+
+    RedisModuleKey *key = mabType_OpenKey(ctx, argv[1]);
+    if(key == NULL){
+        return REDISMODULE_OK;
+    }
+
+    mab_type_obj_t  *mabobj = RedisModule_ModuleTypeGetValue(key);
+    char    buf[MABREDIS_STATBUF_SIZE];
+
+    if(multi_arm_stat_json(mabobj->ma, buf, sizeof(buf)) != 0){
+        return RedisModule_ReplyWithError(ctx, "buf size not enough");
+    }
+
+    return RedisModule_ReplyWithSimpleString(ctx, buf);
+}
 
 static RedisModuleKey *
 mabType_OpenKey(RedisModuleCtx *ctx, RedisModuleString *key)
 {
     RedisModule_KeyType *ret = RedisModule_OpenKey(key, REDISMODULE_READ);
     if(ret == NULL){
-        RedisModule_ReplyWithError(ctx, MABREDIS_ERR_NOTEXISTS);
+        RedisModule_ReplyWithError(ctx, "ERR mab key not exist");
         return NULL;
     }
 
@@ -267,13 +352,13 @@ mabType_OpenKey(RedisModuleCtx *ctx, RedisModuleString *key)
 
 
 static mab_type_obj_t *
-mab_type_obj_new(const char *type, void **choice_strs, int choice_num, int rdb_load)
+mab_type_obj_new(const char *type, size_t type_len, void **choice_strs, int choice_num, int rdb_load)
 {
     mab_type_obj_t  *ret = RedisModule_Alloc(sizeof(*ret));
 
     sstr_t          **choices;
 
-    if(rdb_load != 0){
+    if(rdb_load == 0){
         size_t          len;
         int             i;
         choices = RedisModule_Calloc(choice_num, sizeof(sstr_t *));
@@ -289,7 +374,11 @@ mab_type_obj_new(const char *type, void **choice_strs, int choice_num, int rdb_l
         choices = choice_strs;
     }
 
-    ret->ma = multi_arm_new(type, choices, choice_num);
+    char *t = RedisModule_Alloc(type_len + 1);
+    memcpy(t, type, type_len);
+    t[type_len] = '\0';
+
+    ret->ma = multi_arm_new(t, choices, choice_num);
     ret->choice_num = choice_num;
 
     return ret;
@@ -344,44 +433,49 @@ mabTypeRDBLoad(RedisModuleIO *rdb, int encv)
 {
 
     if(encv != 0){
+        RedisModule_LogIOError(rdb, "warning", "can not load with version %d", encv);
         return NULL;
     }
 
-    long long   len;
+    long long   choice_num;
 
-    RedisModule_LoadUnsigned(rdb, &len);
+    RedisModule_LoadUnsigned(rdb, &choice_num);
 
-    sstr_t   **strs = RedisModule_Calloc(len, sizeof(void *));
+    sstr_t   **strs = RedisModule_Calloc(choice_num, sizeof(void *));
     double      val;
     int         i;
-    for(i = 0; i < len; i++){
+    for(i = 0; i < choice_num; i++){
         strs[i] = RedisModule_Alloc(sizeof(sstr_t));
         strs[i]->data = (uint8_t *)RedisModule_LoadStringBuffer(rdb, &(strs[i]->len));
     }
 
-    long long       l;
+    long long       type_len, arm_len;
     //load policy name
-    const char      *type = RedisModule_LoadStringBuffer(rdb, &l, REDISMODULE_READ);
+    const char      *type = RedisModule_LoadStringBuffer(rdb, &type_len);
 
     //load arms->len
-    RedisModule_LoadUnsigned(rdb, &l);
-    if(l != len){
-        for(i = 0; i < len; i++){
+    RedisModule_LoadUnsigned(rdb, &arm_len);
+    if(arm_len != choice_num){
+        RedisModule_LogIOError(rdb, "warning", "choice %lu != arms %lu", choice_num, arm_len);
+        for(i = 0; i < choice_num; i++){
             RedisModule_Free(strs[i]);
             RedisModule_Free(strs);
         }
+        RedisModule_Free(type);
         return NULL;
     }
 
-    mab_type_obj_t  *mabobj = mab_type_obj_new(type, strs, len, 1);
+    mab_type_obj_t  *mabobj = mab_type_obj_new(type, type_len, strs, choice_num, 1);
 
     //reload arms info
-    for(i = 0; i < len; i++){
+    for(i = 0; i < choice_num; i++){
         mabobj->ma->arms[i].count = RedisModule_LoadUnsigned(rdb);
         mabobj->ma->arms[i].reward = RedisModule_LoadDouble(rdb);
     }
     mabobj->ma->total_count = RedisModule_LoadUnsigned(rdb);
 
+
+    RedisModule_Free(type);
     return mabobj;
 }
 
@@ -436,4 +530,19 @@ mabTypeMemUsage(const void *value)
     ret += sizeof(*mabobj);
 
     return ret;
+}
+
+static void
+mabTypeAofRewrite(RedisModuleIO *aof, RedisModuleString *key, void *value)
+{
+    mab_type_obj_t  *mabobj = value;
+    arm_t           *arms = mabobj->ma->arms;
+    char            reward_str[128];
+    int             i, len = mabobj->ma->len;
+    for(i = 0; i < len; i++){
+        //redis does not support double format specifier. convert to string
+        snprintf(reward_str, sizeof(reward_str), "%.4f" arms[i].reward);
+
+        RedisModule_EmitAOF(aof, "mab.config", "cllc", key, i, arms[i].count, reward_str);
+    }
 }

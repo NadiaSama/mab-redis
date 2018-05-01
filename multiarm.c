@@ -105,7 +105,7 @@ multi_arm_choice(multi_arm_t *mab, int *idx)
 int
 multi_arm_reward(multi_arm_t *mab, int idx, double reward)
 {
-    if(idx > mab->len - 1){
+    if(idx > mab->len - 1 || idx < 0){
         return 1;
     }
 
@@ -142,7 +142,7 @@ multi_arm_stat_json(multi_arm_t *ma, char *obuf, size_t maxlen)
 
         PRINTF(fmt, ma->arms[i].count, ma->arms[i].reward);
     }
-    PRINTF("]");
+    PRINTF("], \"policy\": \"%s\"", ma->policy.name);
     PRINTF("}");
 #undef PRINTF
 
