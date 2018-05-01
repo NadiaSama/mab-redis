@@ -53,7 +53,7 @@ multi_arm_alloc_set(malloc_ptr m, free_ptr f, realloc_ptr r)
 }
 
 multi_arm_t *
-multi_arm_new(const char *policy, void **choices, size_t len)
+multi_arm_new(const char *policy, void **choices, int len)
 {
     multi_arm_t *ret = _malloc(sizeof(*ret));
     if(ret == NULL){
@@ -118,7 +118,7 @@ multi_arm_reward(multi_arm_t *mab, int idx, double reward)
 int
 multi_arm_stat_json(multi_arm_t *ma, char *obuf, size_t maxlen)
 {
-    int     len;
+    size_t     len;
 #define PRINTF(fmt, ...) do{                            \
     len = snprintf(obuf, maxlen, fmt, ##__VA_ARGS__);   \
     if(maxlen < len){                                   \
@@ -152,9 +152,9 @@ multi_arm_stat_json(multi_arm_t *ma, char *obuf, size_t maxlen)
 static int
 policy_init(const char *policy, policy_t *dst)
 {
-    int         i = 0;
+    int         i = 0, len = (int)(sizeof(policies)/sizeof(policies[0]));
 
-    for(i = 0; i < sizeof(policies)/sizeof(policies[0]); i++){
+    for(i = 0; i < len; i++){
         if(strcmp(policies[i].name, policy) == 0){
             dst->op = policies[i].op;
             dst->name = policies[i].name;
@@ -175,9 +175,10 @@ policy_init(const char *policy, policy_t *dst)
 static void *
 policy_ucb1_choice(policy_t *policy, multi_arm_t *ma, int *idx)
 {
+    (void)policy;
     double  ucb_max = 0.0, ucb;
     arm_t   *arm;
-    int     i, ridx;
+    int     i, ridx = 0;
     for(i = 0; i < ma->len; i++){
         if(ma->arms[i].count == 0){
             ridx = i;
@@ -204,6 +205,7 @@ find:
 static void
 policy_ucb1_reward(policy_t *policy, multi_arm_t *ma, int idx, double reward)
 {
+    (void)policy;
     arm_t   *arm = ma->arms + idx;
 
     arm->reward += reward;

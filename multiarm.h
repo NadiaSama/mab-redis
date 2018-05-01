@@ -25,7 +25,7 @@ typedef struct arm_s arm_t;
 
 struct multi_arm_s {
     arm_t       *arms;
-    size_t      len;
+    int         len;
 
     uint64_t    total_count;
     policy_t    policy;
@@ -40,7 +40,7 @@ int multi_arm_alloc_set(malloc_ptr m, free_ptr f, realloc_ptr r);
 struct multi_arm_s;
 typedef struct multi_arm_s multi_arm_t;
 
-multi_arm_t * multi_arm_new(const char *policy, void **choices, size_t l);
+multi_arm_t * multi_arm_new(const char *policy, void **choices, int l);
 void multi_arm_free(multi_arm_t *);
 void * multi_arm_choice(multi_arm_t *, int *idx);
 int multi_arm_reward(multi_arm_t *, int idx, double reward);
