@@ -139,8 +139,11 @@ mabTypeSet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *argv[], int argc
         return RedisModule_WrongArity(ctx);
     }
 
-    RedisModuleKey  *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ|REDISMODULE_WRITE);
-    if(key != REDISMODULE_KEYTYPE_EMPTY){
+    RedisModuleKey  *key = RedisModule_OpenKey(ctx, argv[1], 
+        REDISMODULE_READ|REDISMODULE_WRITE);
+
+
+    if(RedisModule_KeyType(key) != REDISMODULE_KEYTYPE_EMPTY){
         return RedisModule_ReplyWithError(ctx, "ERR key already exist");
     }
 
@@ -149,6 +152,7 @@ mabTypeSet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *argv[], int argc
 
     mab_type_obj_t    *mabobj = mab_type_obj_new(type, l, (void **)argv + 4, (int)choice_num, 0);
     if(mabobj == NULL){
+        RedisModule_DeleteKey(key);
         return RedisModule_ReplyWithError(ctx, "ERR mab obj create failed");
     }
 
@@ -230,7 +234,7 @@ mabTypeReward_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
 
     if(multi_arm_reward(mabobj->ma, (int)idx, reward) != 0){
         return RedisModule_ReplyWithError(ctx,
-                "ERR invalid idx exceed choice range");
+                "ERR invalid argument for reward operate");
     }
 
     RedisModule_ReplyWithLongLong(ctx, 0);
