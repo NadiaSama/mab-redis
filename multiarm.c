@@ -10,7 +10,7 @@
 typedef void *  (*policy_new)();
 typedef void    (*policy_free)(policy_t *);
 typedef void *  (*policy_choice)(policy_t *, multi_arm_t *, int *idx);
-typedef void    (*policy_reward)(policy_t *, multi_arm_t *, int idx, double reward);
+typedef int     (*policy_reward)(policy_t *, multi_arm_t *, int idx, double reward);
 
 struct policy_op_s{
     policy_new      new;
@@ -20,7 +20,7 @@ struct policy_op_s{
 };
 
 static void * policy_ucb1_choice(policy_t *, multi_arm_t *mab, int *idx);
-static void   policy_ucb1_reward(policy_t *, multi_arm_t *mab, int idx, double);
+static int    policy_ucb1_reward(policy_t *, multi_arm_t *mab, int idx, double);
 static policy_op_t policy_ucb1 = {NULL, NULL, policy_ucb1_choice, policy_ucb1_reward};
 
 struct policy_elem_s {
@@ -109,9 +109,15 @@ multi_arm_reward(multi_arm_t *mab, int idx, double reward)
         return 1;
     }
 
-    mab->policy.op->reward(&mab->policy, mab, idx, reward);
+    int ret = mab->policy.op->reward(&mab->policy,
+            mab, idx, reward);
+
+    if(ret){
+        return ret;
+    }
+
     mab->total_count++;
-    return 0;
+    return ret;
 }
 
 
@@ -199,15 +205,20 @@ policy_ucb1_choice(policy_t *policy, multi_arm_t *ma, int *idx)
 
 find:
     *idx = ridx;
-    return ma->arms[i].choice;
+    return ma->arms[ridx].choice;
 }
 
-static void
+static int
 policy_ucb1_reward(policy_t *policy, multi_arm_t *ma, int idx, double reward)
 {
     (void)policy;
+    if(reward < 0 || reward > 1.0){
+        return 1;
+    }
     arm_t   *arm = ma->arms + idx;
 
     arm->reward += reward;
     arm->count++;
+
+    return 0;
 }
