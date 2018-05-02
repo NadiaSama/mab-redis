@@ -22,7 +22,7 @@ mabredis.xo: redismodule.h
 multiarm.c: multiarm.h
 
 mabredis.so: mabredis.o multiarm.o
-	$(LD) -o $@ $< $(SHOBJ_LDFLAGS) $(LIBS) -lc
+	$(LD) -o $@ $^ $(SHOBJ_LDFLAGS) $(LIBS) -lc
 
 clean:
 	rm -rf *.o *.so
