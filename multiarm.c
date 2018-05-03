@@ -195,7 +195,7 @@ policy_ucb1_choice(policy_t *policy, multi_arm_t *ma, int *idx)
     for(i = 0; i < ma->len; i++){
         arm = ma->arms + i;
 
-        ucb = (arm->reward / arm->count) + sqrt(2 * log(arm->count + 1) / ma->total_count);
+        ucb = (arm->reward / arm->count) + sqrt(2 * log(ma->total_count + 1) / arm->count);
 
         if(ucb > ucb_max){
             ucb_max = ucb;
