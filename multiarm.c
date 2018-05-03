@@ -74,6 +74,7 @@ multi_arm_new(const char *policy, void **choices, int len)
         ret->arms[i].choice = choices[i];
     }
     ret->len = len;
+    ret->total_count = 0;
 
     if(policy_init(policy, &ret->policy) == 0){
         return ret;
@@ -173,7 +174,6 @@ policy_init(const char *policy, policy_t *dst)
         }
     }
 
-    log_error("invalid policy name %s", policy);
     return 1;
 }
 
