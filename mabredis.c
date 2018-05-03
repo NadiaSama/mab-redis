@@ -1,10 +1,10 @@
 #include <string.h>
+#include <assert.h>
 
 #include "redismodule.h"
 #include "multiarm.h"
 
 #define MABREDIS_ENCODING_VERSION   0
-#define MABREDIS_METHOD_VERSION     1
 #define MABREDIS_TYPE_NAME          "mab-nadia"
 #define MABREDIS_STATBUF_SIZE       1024
 #define MABREDIS_MAXCHOICE_NUM      64
@@ -63,7 +63,7 @@ RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
     }
 
     RedisModuleTypeMethods  tm = {
-        .version = MABREDIS_METHOD_VERSION,
+        .version = REDISMODULE_TYPE_METHOD_VERSION,
         .rdb_load = mabTypeRDBLoad,
         .rdb_save = mabTypeRDBSave,
         .aof_rewrite = mabTypeAofRewrite,
@@ -158,6 +158,8 @@ mabTypeSet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *argv[], int argc
 
     RedisModule_ModuleTypeSetValue(key, mabType, mabobj);
     RedisModule_ReplyWithLongLong(ctx, choice_num);
+
+    RedisModule_ReplicateVerbatim(ctx);
     return REDISMODULE_OK;
 }
 
@@ -238,6 +240,7 @@ mabTypeReward_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     }
 
     RedisModule_ReplyWithLongLong(ctx, 0);
+    RedisModule_ReplicateVerbatim(ctx);
     return REDISMODULE_OK;
 }
 
@@ -256,7 +259,7 @@ mabTypeConfig_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int ar
 {
     RedisModule_AutoMemory(ctx);
 
-    if(argc - 2 % 3 != 0){
+    if(argc < 5 || (argc - 2) % 3 != 0){
         return RedisModule_WrongArity(ctx);
     }
 
@@ -311,6 +314,9 @@ mabTypeConfig_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int ar
         arm->reward = tmp2;
     }
 
+    RedisModule_ReplyWithLongLong(ctx, 0);
+
+    RedisModule_ReplicateVerbatim(ctx);
     return REDISMODULE_OK;
 }
 
@@ -571,10 +577,11 @@ mabTypeAofRewrite(RedisModuleIO *aof, RedisModuleString *key, void *value)
     arm_t           *arms = mabobj->ma->arms;
     char            reward_str[128];
     int             i, len = mabobj->ma->len;
+
     for(i = 0; i < len; i++){
         //redis does not support double format specifier. convert to string
         snprintf(reward_str, sizeof(reward_str), "%.4f", arms[i].reward);
 
-        RedisModule_EmitAOF(aof, "mab.config", "cllc", key, i, arms[i].count, reward_str);
+        RedisModule_EmitAOF(aof, "mab.config", "sllc", key, i, arms[i].count, reward_str);
     }
 }
