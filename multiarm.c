@@ -14,24 +14,69 @@ typedef void    (*policy_free)(policy_t *);
 typedef void *  (*policy_choice)(policy_t *, multi_arm_t *, int *idx);
 typedef int     (*policy_reward)(policy_t *, multi_arm_t *, int idx, double reward);
 
+#ifdef MABREDIS_MODULE
+typedef struct RedisModuleIO RedisModuleIO;
+
+extern void (*RedisModule_SaveUnsigned)(RedisModuleIO *io, uint64_t value);
+extern void (*RedisModule_SaveDouble)(RedisModuleIO *io, double value);
+extern void (*RedisModule_SaveStringBuffer)(RedisModuleIO *io, const char *str, size_t len);
+extern uint64_t (*RedisModule_LoadUnsigned)(RedisModuleIO *io);
+extern double (*RedisModule_LoadDouble)(RedisModuleIO *io);
+extern char *(*RedisModule_LoadStringBuffer)(RedisModuleIO *io, size_t *lenptr);
+extern void (*RedisModule_Free)(void *ptr);
+extern void (*RedisModule_LogIOError)(RedisModuleIO *io, const char *levelstr, const char *fmt, ...);
+
+
+typedef void    (*policy_rdb_save)(policy_t *, RedisModuleIO *); 
+typedef void *  (*policy_rdb_load)(policy_t *, RedisModuleIO *);
+#endif
+
 struct policy_op_s{
     policy_new      new;
     policy_free     free;
     policy_choice   choice;
     policy_reward   reward;
+
+#ifdef MABREDIS_MODULE
+    policy_rdb_save save;
+    policy_rdb_load load;
+#endif
 };
 
 static void * policy_ucb1_choice(policy_t *, multi_arm_t *mab, int *idx);
 static int    policy_ucb1_reward(policy_t *, multi_arm_t *mab, int idx, double);
-static policy_op_t policy_ucb1 = {NULL, NULL, policy_ucb1_choice, policy_ucb1_reward};
+static policy_op_t policy_ucb1 = {
+    .new = NULL,
+    .free = NULL,
+    .choice = policy_ucb1_choice, 
+    .reward = policy_ucb1_reward,
+
+#ifdef MABREDIS_MODULE
+    .save = NULL,
+    .load = NULL,
+#endif
+};
 
 static void * policy_egreedy_new(const char *option);
 static void   policy_egreedy_free(policy_t *);
 static void * policy_egreedy_choice(policy_t *, multi_arm_t *, int *idx);
-//static int    policy_egreedy_reward(policy_t *, multi_arm_t *, int, double);
 #define policy_egreedy_reward policy_ucb1_reward
-static policy_op_t policy_egreedy = {policy_egreedy_new, policy_egreedy_free,
-    policy_egreedy_choice, policy_egreedy_reward};
+
+#ifdef MABREDIS_MODULE
+static void   policy_egreedy_save(policy_t *, RedisModuleIO *);
+static void * policy_egreedy_load(policy_t *, RedisModuleIO *);
+#endif
+static policy_op_t policy_egreedy = {
+    .new = policy_egreedy_new,
+    .free = policy_egreedy_free,
+    .choice = policy_egreedy_choice,
+    .reward = policy_egreedy_reward,
+
+#ifdef MABREDIS_MODULE
+    .save = policy_egreedy_save,
+    .load = policy_egreedy_load,
+#endif
+};
 
 struct policy_elem_s {
     const char      *name;
@@ -172,6 +217,78 @@ multi_arm_stat_json(multi_arm_t *ma, char *obuf, size_t maxlen)
     return 0;
 }
 
+#ifdef MABREDIS_MODULE
+void
+multi_arm_rdb_save(multi_arm_t *ma, struct RedisModuleIO *rdb)
+{
+    //save multi_arm_t arms
+    RedisModule_SaveUnsigned(rdb, ma->len);
+
+    int i;
+    for(i = 0; i < ma->len; i++){
+        RedisModule_SaveUnsigned(rdb, ma->arms[i].count);
+        RedisModule_SaveDouble(rdb, ma->arms[i].reward);
+    }
+
+    RedisModule_SaveUnsigned(rdb, ma->total_count);
+
+    RedisModule_SaveStringBuffer(rdb, ma->policy.name,
+            strlen(ma->policy.name));
+    if(ma->policy.op->save){
+        ma->policy.op->save(&ma->policy, rdb);
+    }
+}
+
+multi_arm_t *
+multi_arm_rdb_load(struct RedisModuleIO  *rdb, int encv)
+{
+    (void)encv;
+    multi_arm_t     *ma = _malloc(sizeof(*ma));
+    int             i;
+
+    ma->len = RedisModule_LoadUnsigned(rdb);
+    ma->arms = _malloc(ma->len * sizeof(arm_t));
+    for(i = 0; i < ma->len; i++){
+        ma->arms[i].count = RedisModule_LoadUnsigned(rdb);
+        ma->arms[i].reward = RedisModule_LoadDouble(rdb);
+    }
+
+    ma->total_count = RedisModule_LoadUnsigned(rdb);
+
+    size_t  policy_len;
+    char    *policy = RedisModule_LoadStringBuffer(rdb, &policy_len);
+
+    for(i = 0; i < (int)(sizeof(policies)/sizeof(policies[0])); i++){
+        if(strlen(policies[i].name) == policy_len &&
+                strncmp(policies[i].name, policy, policy_len) == 0){
+            ma->policy.op = policies[i].op;
+            ma->policy.name = policies[i].name;
+            break;
+        }
+    }
+
+    if(i == sizeof(policies)/sizeof(policies[0])){
+        RedisModule_LogIOError(rdb, "warning", "unsupport multi_arm_policy %.*s", (int)policy_len, policy);
+        goto error;
+    }
+
+    ma->policy.data = ma->policy.op->load(&ma->policy, rdb);
+    if(ma->policy.data == NULL){
+        goto error;
+    }
+    goto done;
+
+error:
+    _free(ma->arms);
+    _free(ma);
+    ma = NULL;
+
+done:
+    RedisModule_Free(policy);
+    return ma;
+}
+#endif
+
 static int
 policy_init(const char *policy, policy_t *dst, const char *option)
 {
@@ -292,3 +409,23 @@ find:
     *idx = ridx;
     return ma->arms[ridx].choice;
 }
+
+#ifdef MABREDIS_MODULE
+static void
+policy_egreedy_save(policy_t *p, RedisModuleIO *rdb)
+{
+    RedisModule_SaveDouble(rdb, *((double *)p->data));
+}
+
+static void *
+policy_egreedy_load(policy_t *p, RedisModuleIO *rdb)
+{
+    (void)p;
+
+    double  val = RedisModule_LoadDouble(rdb);
+    double  *ret = _malloc(sizeof(double));
+
+    *ret = val;
+    return ret;
+}
+#endif

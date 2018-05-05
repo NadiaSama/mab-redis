@@ -47,4 +47,17 @@ int multi_arm_reward(multi_arm_t *, int idx, double reward);
 
 int multi_arm_stat_json(multi_arm_t *, char *, size_t maxlen);
 
+
+#ifdef MABREDIS_MODULE
+/*
+ * #include "redismodule.h"
+ *
+ * "redismodule.h" export some global function so can not include twice
+ */
+struct RedisModuleIO;
+
+void multi_arm_rdb_save(multi_arm_t *, struct RedisModuleIO *rdb);
+multi_arm_t * multi_arm_rdb_load(struct RedisModuleIO *, int encv);
+#endif
+
 #endif
