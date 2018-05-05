@@ -288,9 +288,13 @@ multi_arm_rdb_load(struct RedisModuleIO  *rdb, int encv)
         goto error;
     }
 
-    ma->policy.data = ma->policy.op->load(&ma->policy, rdb);
-    if(ma->policy.data == NULL){
-        goto error;
+    if(ma->policy.op->load){
+        ma->policy.data = ma->policy.op->load(&ma->policy, rdb);
+        if(ma->policy.data == NULL){
+            goto error;
+        }
+    }else{
+        ma->policy.data = NULL;
     }
     goto done;
 
