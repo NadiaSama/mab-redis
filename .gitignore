@@ -57,3 +57,5 @@ dkms.conf
 #redis persisten file
 *.rdb
 *.aof
+#redis conf
+/redis.conf
