@@ -10,7 +10,8 @@ main(void)
 {
     void    *choice[LEN] = {(void *)0x1, (void *)0x2, (void *)0x3, (void *)0x4};
 
-    multi_arm_t *ma = multi_arm_new("ucb1", choice, LEN);
+    multi_arm_init(NULL, NULL, NULL);
+    multi_arm_t *ma = multi_arm_new("egreedy", choice, LEN, "0.2");
     assert(ma != NULL);
 
     int     i, idx;
