@@ -1,13 +1,15 @@
 #include <math.h>
+#include <time.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
 #include "multiarm.h"
+#include "pcg.h"
 #include "log.h"
 
-typedef void *  (*policy_new)();
+typedef void *  (*policy_new)(const char *option);
 typedef void    (*policy_free)(policy_t *);
 typedef void *  (*policy_choice)(policy_t *, multi_arm_t *, int *idx);
 typedef int     (*policy_reward)(policy_t *, multi_arm_t *, int idx, double reward);
@@ -23,6 +25,14 @@ static void * policy_ucb1_choice(policy_t *, multi_arm_t *mab, int *idx);
 static int    policy_ucb1_reward(policy_t *, multi_arm_t *mab, int idx, double);
 static policy_op_t policy_ucb1 = {NULL, NULL, policy_ucb1_choice, policy_ucb1_reward};
 
+static void * policy_egreedy_new(const char *option);
+static void   policy_egreedy_free(policy_t *);
+static void * policy_egreedy_choice(policy_t *, multi_arm_t *, int *idx);
+//static int    policy_egreedy_reward(policy_t *, multi_arm_t *, int, double);
+#define policy_egreedy_reward policy_ucb1_reward
+static policy_op_t policy_egreedy = {policy_egreedy_new, policy_egreedy_free,
+    policy_egreedy_choice, policy_egreedy_reward};
+
 struct policy_elem_s {
     const char      *name;
     policy_op_t     *op;
@@ -30,30 +40,36 @@ struct policy_elem_s {
 typedef struct policy_elem_s policy_elem_t;
 
 static policy_elem_t policies[] = {
-    {"ucb1", &policy_ucb1}
+    {"ucb1", &policy_ucb1},
+    {"egreedy", &policy_egreedy}
 };
-static int policy_init(const char *, policy_t *dst);
+static int policy_init(const char *policy, policy_t *dst, const char *option);
 
 static malloc_ptr  _malloc = malloc;
 static free_ptr    _free = free;
 static realloc_ptr _realloc = realloc;
 
 int
-multi_arm_alloc_set(malloc_ptr m, free_ptr f, realloc_ptr r)
+multi_arm_init(malloc_ptr m, free_ptr f, realloc_ptr r)
 {
-    if(m == NULL || f == NULL || r == NULL){
-        return EINVAL;
+    if(m){
+        _malloc = m;
     }
 
-    _malloc = m;
-    _free = f;
-    _realloc = r;
+    if(f){
+        _free = f;
+    }
 
+    if(r){
+        _realloc = r;
+    }
+
+    pcg32_srandom(time(NULL) ^ (intptr_t)&printf, (intptr_t)&sprintf);
     return 0;
 }
 
 multi_arm_t *
-multi_arm_new(const char *policy, void **choices, int len)
+multi_arm_new(const char *policy, void **choices, int len, const char *option)
 {
     multi_arm_t *ret = _malloc(sizeof(*ret));
     if(ret == NULL){
@@ -76,7 +92,7 @@ multi_arm_new(const char *policy, void **choices, int len)
     ret->len = len;
     ret->total_count = 0;
 
-    if(policy_init(policy, &ret->policy) == 0){
+    if(policy_init(policy, &ret->policy, option) == 0){
         return ret;
     }
 
@@ -157,7 +173,7 @@ multi_arm_stat_json(multi_arm_t *ma, char *obuf, size_t maxlen)
 }
 
 static int
-policy_init(const char *policy, policy_t *dst)
+policy_init(const char *policy, policy_t *dst, const char *option)
 {
     int         i = 0, len = (int)(sizeof(policies)/sizeof(policies[0]));
 
@@ -168,7 +184,10 @@ policy_init(const char *policy, policy_t *dst)
             if(policies[i].op->new == NULL){
                 dst->data = NULL;
             }else{
-                dst->data = policies[i].op->new();
+                dst->data = policies[i].op->new(option);
+                if(dst->data == NULL){
+                    return 1;
+                }
             }
             return 0;
         }
@@ -221,4 +240,55 @@ policy_ucb1_reward(policy_t *policy, multi_arm_t *ma, int idx, double reward)
     arm->count++;
 
     return 0;
+}
+
+
+static void *
+policy_egreedy_new(const char *option)
+{
+    double d = atof(option);
+    if(d < 0 || d > 1.00000000001){
+        return NULL;
+    }
+
+    double  *ret = _malloc(sizeof(double));
+    *ret = d;
+    return (void *)ret;
+}
+
+
+static void
+policy_egreedy_free(policy_t *policy)
+{
+    _free(policy->data);
+}
+
+static void *
+policy_egreedy_choice(policy_t *policy, multi_arm_t *ma, int *idx)
+{
+    double  r = randnumber(), epsilon = *((double *)policy->data);
+    int     i, ridx = -1;
+    if(r < epsilon || ma->total_count == 0){
+        i = randint(ma->len);
+        ridx = i;
+        goto find;
+    }
+
+    double  max_avg = -0.1, avg;
+    for(i = 0; i < ma->len; i++){
+        if(ma->arms[i].count){
+            avg = ma->arms[i].reward / ma->arms[i].count;
+        }else{
+            avg = 0.0;
+        }
+
+        if(avg > max_avg){
+            ridx = i;
+            max_avg = avg;
+        }
+    }
+
+find:
+    *idx = ridx;
+    return ma->arms[ridx].choice;
 }
