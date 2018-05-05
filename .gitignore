@@ -53,3 +53,7 @@ dkms.conf
 
 #swap file
 *.swp
+
+#redis persisten file
+*.rdb
+*.aof
