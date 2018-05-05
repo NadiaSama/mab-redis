@@ -141,7 +141,7 @@ mabTypeSet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *argv[], int argc
         return RedisModule_ReplyWithError(ctx, "ERR choice_num too big");
     }
 
-    if(choice_num != argc - 4 || choice_num != argc - 5){
+    if(choice_num != argc - 4 && choice_num != argc - 5){
         return RedisModule_WrongArity(ctx);
     }
 
