@@ -475,8 +475,8 @@ mabTypeRDBLoad(RedisModuleIO *rdb, int encv)
 
 error1:
     for(i = 0; i < choice_num; i++){
+        RedisModule_Free(strs[i]->data);
         RedisModule_Free(strs[i]);
-        RedisModule_Free(strs);
     }
     RedisModule_Free(strs);
     RedisModule_Free(mabobj);
