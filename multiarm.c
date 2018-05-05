@@ -13,6 +13,7 @@ typedef void *  (*policy_new)(const char *option);
 typedef void    (*policy_free)(policy_t *);
 typedef void *  (*policy_choice)(policy_t *, multi_arm_t *, int *idx);
 typedef int     (*policy_reward)(policy_t *, multi_arm_t *, int idx, double reward);
+typedef int     (*policy_stat_json)(policy_t *, char *obuf, size_t maxlen);
 
 #ifdef MABREDIS_MODULE
 typedef struct RedisModuleIO RedisModuleIO;
@@ -32,10 +33,11 @@ typedef void *  (*policy_rdb_load)(policy_t *, RedisModuleIO *);
 #endif
 
 struct policy_op_s{
-    policy_new      new;
-    policy_free     free;
-    policy_choice   choice;
-    policy_reward   reward;
+    policy_new          new;
+    policy_free         free;
+    policy_choice       choice;
+    policy_reward       reward;
+    policy_stat_json    sj;
 
 #ifdef MABREDIS_MODULE
     policy_rdb_save save;
@@ -50,6 +52,7 @@ static policy_op_t policy_ucb1 = {
     .free = NULL,
     .choice = policy_ucb1_choice, 
     .reward = policy_ucb1_reward,
+    .sj = NULL,
 
 #ifdef MABREDIS_MODULE
     .save = NULL,
@@ -61,6 +64,7 @@ static void * policy_egreedy_new(const char *option);
 static void   policy_egreedy_free(policy_t *);
 static void * policy_egreedy_choice(policy_t *, multi_arm_t *, int *idx);
 #define policy_egreedy_reward policy_ucb1_reward
+static int    policy_egreedy_stat_json(policy_t *, char *, size_t maxlen);
 
 #ifdef MABREDIS_MODULE
 static void   policy_egreedy_save(policy_t *, RedisModuleIO *);
@@ -71,6 +75,7 @@ static policy_op_t policy_egreedy = {
     .free = policy_egreedy_free,
     .choice = policy_egreedy_choice,
     .reward = policy_egreedy_reward,
+    .sj = policy_egreedy_stat_json,
 
 #ifdef MABREDIS_MODULE
     .save = policy_egreedy_save,
@@ -198,7 +203,7 @@ multi_arm_stat_json(multi_arm_t *ma, char *obuf, size_t maxlen)
 
 #define FMT "{\"count\": %lu, \"reward\": %f}"
 
-    PRINTF("{\"arms\": [");
+    PRINTF("{\"total_count\": %lu, \"arms\": [", ma->total_count);
     const char  *fmt;
     int         i;
     for(i = 0; i < ma->len; i++){
@@ -210,7 +215,18 @@ multi_arm_stat_json(multi_arm_t *ma, char *obuf, size_t maxlen)
 
         PRINTF(fmt, ma->arms[i].count, ma->arms[i].reward);
     }
-    PRINTF("], \"policy\": \"%s\"", ma->policy.name);
+    PRINTF("], ");
+    
+    if(ma->policy.op->sj){
+        len = ma->policy.op->sj(&ma->policy, obuf, maxlen);
+        if(maxlen < len){
+            return 1;
+        }
+        maxlen -= len;
+        obuf += len;
+    }else{
+        PRINTF("\"policy\": \"%s\"", ma->policy.name);
+    }
     PRINTF("}");
 #undef PRINTF
 
@@ -363,8 +379,14 @@ policy_ucb1_reward(policy_t *policy, multi_arm_t *ma, int idx, double reward)
 static void *
 policy_egreedy_new(const char *option)
 {
-    double d = atof(option);
-    if(d < 0 || d > 1.00000000001){
+    if(option == NULL){
+        return NULL;
+    }
+
+    char    *eptr = NULL;
+    double  d = strtod(option, &eptr);
+    if(eptr == option || d < 0 || d > 1.00000000001){
+        printf("conver fail %s\n", eptr);
         return NULL;
     }
 
@@ -408,6 +430,13 @@ policy_egreedy_choice(policy_t *policy, multi_arm_t *ma, int *idx)
 find:
     *idx = ridx;
     return ma->arms[ridx].choice;
+}
+
+static int
+policy_egreedy_stat_json(policy_t *p, char *obuf, size_t maxlen)
+{
+    return snprintf(obuf, maxlen, "\"policy\": \"%s\", \"epsilon\": %0.4f", p->name,
+            *((double *)p->data));
 }
 
 #ifdef MABREDIS_MODULE
