@@ -44,10 +44,16 @@ static int mabTypeStatJson_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *
         int );
 static RedisModuleKey * mabType_OpenKey(RedisModuleCtx *ctx, RedisModuleString *);
 
-static mab_type_obj_t * mab_type_obj_new(const char *type, size_t type_len,
-        void **choices, int choice_num, int rdb_load);
+static mab_type_obj_t * mab_type_obj_new(RedisModuleString *type,
+        RedisModuleString **choices, int choice_num, RedisModuleString *option);
 
 static void mab_type_obj_free(mab_type_obj_t *);
+
+/*
+ * helper function
+ */
+static sstr_t **RedisModule_StringToSStrs(RedisModuleString **strs, int num);
+static char * RedisModule_StringToCStr(RedisModuleString *str);
 
 int
 RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
@@ -55,7 +61,7 @@ RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
     REDISMODULE_NOT_USED(argv);
     REDISMODULE_NOT_USED(argc);
 
-    multi_arm_alloc_set(RedisModule_Alloc, RedisModule_Free, RedisModule_Realloc);
+    multi_arm_init(RedisModule_Alloc, RedisModule_Free, RedisModule_Realloc);
 
     if(RedisModule_Init(ctx, MABREDIS_TYPE_NAME, 1,
                 REDISMODULE_APIVER_1) == REDISMODULE_ERR){
@@ -110,7 +116,7 @@ RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
 /* 
  * command:
  *
- * mab.set $key $type $choice_num $choice1 $choice2 $choice3 ...
+ * mab.set $key $type $choice_num $choice1 $choice2 $choice3 ... [$option]
  * 
  * return:
  *
@@ -135,7 +141,7 @@ mabTypeSet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *argv[], int argc
         return RedisModule_ReplyWithError(ctx, "ERR choice_num too big");
     }
 
-    if(choice_num != argc - 4){
+    if(choice_num != argc - 4 || choice_num != argc - 5){
         return RedisModule_WrongArity(ctx);
     }
 
@@ -147,10 +153,8 @@ mabTypeSet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *argv[], int argc
         return RedisModule_ReplyWithError(ctx, "ERR key already exist");
     }
 
-    size_t      l;
-    const char  *type = RedisModule_StringPtrLen(argv[2], &l);
-
-    mab_type_obj_t    *mabobj = mab_type_obj_new(type, l, (void **)argv + 4, (int)choice_num, 0);
+    mab_type_obj_t    *mabobj = mab_type_obj_new(argv[2], argv + 4, (int)choice_num,
+            (choice_num == argc - 5) ? argv[argc - 1]: NULL);
     if(mabobj == NULL){
         RedisModule_DeleteKey(key);
         return RedisModule_ReplyWithError(ctx, "ERR mab obj create failed");
@@ -370,50 +374,40 @@ mabType_OpenKey(RedisModuleCtx *ctx, RedisModuleString *key)
 
 
 static mab_type_obj_t *
-mab_type_obj_new(const char *type, size_t type_len, void **choice_strs, int choice_num, int rdb_load)
+mab_type_obj_new(RedisModuleString *type, RedisModuleString **choice_strs, int choice_num,
+        RedisModuleString *option_str)
 {
     mab_type_obj_t  *ret = RedisModule_Alloc(sizeof(*ret));
 
-    sstr_t          **choices;
+    sstr_t          **choices = RedisModule_StringToSStrs(choice_strs, choice_num);
+    char            *option = NULL, *t = RedisModule_StringToCStr(type);
 
-    if(rdb_load == 0){
-        size_t          len;
-        int             i;
-        choices = RedisModule_Calloc(choice_num, sizeof(sstr_t *));
-
-        for(i = 0; i < choice_num; i++){
-            choices[i] = RedisModule_Alloc(sizeof(sstr_t));
-
-            choices[i]->data = (uint8_t *)RedisModule_Strdup(RedisModule_StringPtrLen(
-                        ((RedisModuleString **)choice_strs)[i], &len));
-            choices[i]->len = len;
-        }
-    }else{
-        choices = (sstr_t **)choice_strs;
+    if(option_str != NULL){
+        option = RedisModule_StringToCStr(option_str);
     }
 
-    char *t = RedisModule_Alloc(type_len + 1);
-    memcpy(t, type, type_len);
-    t[type_len] = '\0';
-
-    ret->ma = multi_arm_new(t, (void **)choices, choice_num);
+    ret->ma = multi_arm_new(t, (void **)choices, choice_num, option);
     if(ret->ma == NULL){
-        if(rdb_load == 0){
-            int i;
-            for(i = 0; i < choice_num; i++){
-                RedisModule_Free(choices[i]->data);
-                RedisModule_Free(choices[i]);
-            }
-            RedisModule_Free(choices);
+        int i;
+        for(i = 0; i < choice_num; i++){
+            RedisModule_Free(choices[i]->data);
+            RedisModule_Free(choices[i]);
         }
+
+        RedisModule_Free(choices);
         RedisModule_Free(ret);
         ret = NULL;
+
     }else{
         ret->choice_num = choice_num;
         ret->choices = choices;
     }
 
+    if(option != NULL){
+        RedisModule_Free(option);
+    }
     RedisModule_Free(t);
+
     return ret;
 }
 
@@ -436,7 +430,6 @@ static void
 mabTypeRDBSave(RedisModuleIO *rdb, void *value)
 {
     mab_type_obj_t  *mabobj = value;
-    multi_arm_t     *ma = mabobj->ma;
     int             i = 0;
     //save choices array
     RedisModule_SaveUnsigned(rdb, mabobj->choice_num);
@@ -445,18 +438,7 @@ mabTypeRDBSave(RedisModuleIO *rdb, void *value)
                 mabobj->choices[i]->len);
     }
 
-    //save policy earlier handy for reload
-    RedisModule_SaveStringBuffer(rdb, ma->policy.name,
-            strlen(ma->policy.name));
-
-    //save multi_arm_t arms
-    RedisModule_SaveUnsigned(rdb, ma->len);
-    for(i = 0; i < ma->len; i++){
-        RedisModule_SaveUnsigned(rdb, ma->arms[i].count);
-        RedisModule_SaveDouble(rdb, ma->arms[i].reward);
-    }
-
-    RedisModule_SaveUnsigned(rdb, ma->total_count);
+    multi_arm_rdb_save(mabobj->ma, rdb);
 }
 
 
@@ -468,10 +450,7 @@ mabTypeRDBLoad(RedisModuleIO *rdb, int encv)
         return NULL;
     }
 
-    long long   choice_num;
-
-    choice_num = RedisModule_LoadUnsigned(rdb);
-
+    long long   choice_num = RedisModule_LoadUnsigned(rdb);
     sstr_t   **strs = RedisModule_Calloc(choice_num, sizeof(void *));
     int         i;
     for(i = 0; i < choice_num; i++){
@@ -479,41 +458,31 @@ mabTypeRDBLoad(RedisModuleIO *rdb, int encv)
         strs[i]->data = (uint8_t *)RedisModule_LoadStringBuffer(rdb, &(strs[i]->len));
     }
 
-    mab_type_obj_t  *mabobj = NULL;
-    long long       arm_len;
-    size_t          type_len;
-    //load policy name
-    char            *type = RedisModule_LoadStringBuffer(rdb, &type_len);
+    mab_type_obj_t  *mabobj = RedisModule_Alloc(sizeof(*mabobj));
+    mabobj->choices = strs;
+    mabobj->choice_num = choice_num;
 
-    //load arms->len
-    arm_len = RedisModule_LoadUnsigned(rdb);
-    if(arm_len != choice_num){
-        RedisModule_LogIOError(rdb, "warning", "choice %lu != arms %lu", choice_num, arm_len);
+    multi_arm_t     *ma = multi_arm_rdb_load(rdb, encv);
+    if(ma == NULL){
         goto error1;
     }
 
-    mabobj = mab_type_obj_new(type, type_len, (void **)strs, choice_num, 1);
-    if(mabobj == NULL){
-        RedisModule_LogIOError(rdb, "warning", "mab obj create failed");
-        goto error1;
-    }
-
-    //reload arms info
+    mabobj->ma = ma;
     for(i = 0; i < choice_num; i++){
-        mabobj->ma->arms[i].count = RedisModule_LoadUnsigned(rdb);
-        mabobj->ma->arms[i].reward = RedisModule_LoadDouble(rdb);
+        ma->arms[i].choice = mabobj->choices[i];
     }
-    mabobj->ma->total_count = RedisModule_LoadUnsigned(rdb);
-    goto error0;
+    goto done;
 
 error1:
     for(i = 0; i < choice_num; i++){
         RedisModule_Free(strs[i]);
         RedisModule_Free(strs);
     }
+    RedisModule_Free(strs);
+    RedisModule_Free(mabobj);
+    mabobj = NULL;
 
-error0:
-    RedisModule_Free(type);
+done:
     return mabobj;
 }
 
@@ -584,4 +553,35 @@ mabTypeAofRewrite(RedisModuleIO *aof, RedisModuleString *key, void *value)
 
         RedisModule_EmitAOF(aof, "mab.config", "sllc", key, i, arms[i].count, reward_str);
     }
+}
+
+static sstr_t **
+RedisModule_StringToSStrs(RedisModuleString **strs, int num)
+{
+    sstr_t          **ret;
+    size_t          len;
+    int             i;
+    ret = RedisModule_Calloc(num, sizeof(sstr_t *));
+
+    for(i = 0; i < num; i++){
+        ret[i] = RedisModule_Alloc(sizeof(sstr_t));
+
+        ret[i]->data = (uint8_t *)RedisModule_Strdup(RedisModule_StringPtrLen(
+                    ((RedisModuleString **)strs)[i], &len));
+        ret[i]->len = len;
+    }
+
+    return ret;
+}
+
+static char *
+RedisModule_StringToCStr(RedisModuleString *str)
+{
+    size_t      len;
+    const char  *p = RedisModule_StringPtrLen(str, &len);
+
+    char    *ret = RedisModule_Alloc(len + 1);
+    memcpy(ret, p, len);
+    ret[len] = '\0';
+    return ret;
 }
