@@ -155,7 +155,7 @@ void
 multi_arm_free(multi_arm_t *arm)
 {
     if(arm->policy.op->free != NULL){
-        arm->policy.op->free(arm->policy.data);
+        arm->policy.op->free(&arm->policy);
     }
 
     _free(arm->arms);
