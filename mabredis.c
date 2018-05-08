@@ -302,6 +302,11 @@ mabTypeConfig_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int ar
         if(tmp2 < 0){
             return RedisModule_ReplyWithError(ctx, "ERR invalid reward value");
         }
+
+        //ensure average reward less than 1.0
+        if((tmp1 == 0 && tmp2 > 1.0) || (tmp2 / tmp1 > 1.0)){
+            return RedisModule_ReplyWithError(ctx, "ERR invalid reward/count value");
+        }
     }
 
 
