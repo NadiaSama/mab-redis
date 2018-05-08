@@ -52,7 +52,7 @@ int multi_arm_stat_json(multi_arm_t *, char *, size_t maxlen);
 /*
  * #include "redismodule.h"
  *
- * "redismodule.h" export some global function so can not include twice
+ * "redismodule.h" define some global function so can not include twice
  */
 struct RedisModuleIO;
 
