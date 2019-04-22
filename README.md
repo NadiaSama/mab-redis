@@ -1,5 +1,5 @@
 # mab-redis
-an redis module which impolement multi-armed bandtis algorithm
+an redis module which implement multi-armed bandtis algorithm
 
 currently **ucb1**, **egreey(epsilon-greedy)** algorithm was implemented
 
