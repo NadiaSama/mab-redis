@@ -174,7 +174,7 @@ mabTypeSet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *argv[], int argc
  *
  * 
  * return:
- * (idx, reward)
+ * (idx, choice)
  */
 static int
 mabTypeChoice_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
@@ -278,6 +278,8 @@ mabTypeConfig_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int ar
     long long       tmp1;
     double          tmp2;
     int             i;
+
+    //check input args
     for(i = 2; i < argc;){
         //for $arm_idx
         if(RedisModule_StringToLongLong(argv[i++], &tmp1) != REDISMODULE_OK){
