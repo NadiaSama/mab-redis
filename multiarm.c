@@ -546,6 +546,7 @@ policy_ts_choice(policy_t *p, multi_arm_t *m, int *idx)
 
     for(i = 0; i < data->len; i++){
         tmp = Beta_Function((double)data->arms[i].win, (double)data->arms[i].lose);
+        log_dev("choice %d (%d %d) %f", i, data->arms[i].win, data->arms[i].lose, tmp);
         if(tmp > maxp){
             maxi = i;
             maxp = tmp;
@@ -553,7 +554,7 @@ policy_ts_choice(policy_t *p, multi_arm_t *m, int *idx)
     }
 
     *idx = maxi;
-    return m->arms[i].choice;
+    return m->arms[maxi].choice;
 }
 
 static int
