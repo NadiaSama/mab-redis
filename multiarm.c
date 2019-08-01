@@ -9,7 +9,9 @@
 #include "pcg.h"
 #include "log.h"
 
-typedef void *  (*policy_new)(const char *option);
+#define UNUSED(p) ((void)p)
+
+typedef void *  (*policy_new)(multi_arm_t *, const char *option);
 typedef void    (*policy_free)(policy_t *);
 typedef void *  (*policy_choice)(policy_t *, multi_arm_t *, int *idx);
 typedef int     (*policy_reward)(policy_t *, multi_arm_t *, int idx, double reward);
@@ -60,7 +62,7 @@ static policy_op_t policy_ucb1 = {
 #endif
 };
 
-static void * policy_egreedy_new(const char *option);
+static void * policy_egreedy_new(multi_arm_t *, const char *option);
 static void   policy_egreedy_free(policy_t *);
 static void * policy_egreedy_choice(policy_t *, multi_arm_t *, int *idx);
 #define policy_egreedy_reward policy_ucb1_reward
@@ -83,6 +85,20 @@ static policy_op_t policy_egreedy = {
 #endif
 };
 
+// record each arms win lose count
+struct alpha_beta_s {
+    uint64_t    win;
+    uint64_t    lose;
+};
+typedef struct alpha_beta_s alpha_beta_t;
+
+
+struct policy_ts_data_s {
+    uint64_t    size;
+    alpha_beta_t    arms[1];
+};
+typedef struct policy_ts_data_s policy_ts_data_t;
+
 struct policy_elem_s {
     const char      *name;
     policy_op_t     *op;
@@ -93,7 +109,7 @@ static policy_elem_t policies[] = {
     {"ucb1", &policy_ucb1},
     {"egreedy", &policy_egreedy}
 };
-static int policy_init(const char *policy, policy_t *dst, const char *option);
+static int policy_init(multi_arm_t *, const char *policy, policy_t *dst, const char *option);
 
 static malloc_ptr  _malloc = malloc;
 static free_ptr    _free = free;
@@ -142,7 +158,7 @@ multi_arm_new(const char *policy, void **choices, int len, const char *option)
     ret->len = len;
     ret->total_count = 0;
 
-    if(policy_init(policy, &ret->policy, option) == 0){
+    if(policy_init(ret, policy, &ret->policy, option) == 0){
         return ret;
     }
 
@@ -310,7 +326,7 @@ done:
 #endif
 
 static int
-policy_init(const char *policy, policy_t *dst, const char *option)
+policy_init(multi_arm_t *m, const char *policy, policy_t *dst, const char *option)
 {
     int         i = 0, len = (int)(sizeof(policies)/sizeof(policies[0]));
 
@@ -321,7 +337,7 @@ policy_init(const char *policy, policy_t *dst, const char *option)
             if(policies[i].op->new == NULL){
                 dst->data = NULL;
             }else{
-                dst->data = policies[i].op->new(option);
+                dst->data = policies[i].op->new(m, option);
                 if(dst->data == NULL){
                     return 1;
                 }
@@ -381,8 +397,10 @@ policy_ucb1_reward(policy_t *policy, multi_arm_t *ma, int idx, double reward)
 
 
 static void *
-policy_egreedy_new(const char *option)
+policy_egreedy_new(multi_arm_t *m, const char *option)
 {
+    UNUSED(m);
+    
     if(option == NULL){
         return NULL;
     }
