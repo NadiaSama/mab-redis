@@ -7,13 +7,16 @@ ifeq ($(uname_S),Linux)
 	SHOBJ_CFLAGS ?= -W -Wall -fno-common -g -ggdb -std=c99 -O2 -DMABREDIS_MODULE
 	SHOBJ_LDFLAGS ?= -shared
 else
-	SHOBJ_CFLAGS ?= -W -Wall -dynamic -fno-common -g -ggdb -std=c99 -O2 -DMABREDIS_MODULE
+	SHOBJ_CFLAGS ?= -W -Wall -dynamic -fno-common -g -ggdb -std=c99 -O2 -DMABREDIS_MODULE 
 	SHOBJ_LDFLAGS ?= -bundle -undefined dynamic_lookup
 endif
 
 .SUFFIXES: .c .so .o
 
+
 all: mabredis.so 
+
+vpath %.c beta_fn
 
 .c.o:
 	$(CC) -I. $(CFLAGS) $(SHOBJ_CFLAGS) -fPIC -c $< -o $@
@@ -21,7 +24,7 @@ all: mabredis.so
 mabredis.xo: redismodule.h
 multiarm.c: multiarm.h
 
-mabredis.so: mabredis.o multiarm.o pcg.o
+mabredis.so: mabredis.o multiarm.o pcg.o beta_function.o gamma_function.o ln_gamma_function.o
 	$(LD) -o $@ $^ $(SHOBJ_LDFLAGS) $(LIBS) -lc
 
 clean:
