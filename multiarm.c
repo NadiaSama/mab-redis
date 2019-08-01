@@ -10,12 +10,23 @@
 #include "log.h"
 
 #define UNUSED(p) ((void)p)
+#define PRINTF(fmt, ...) do{                            \
+    len = snprintf(obuf, maxlen, fmt, ##__VA_ARGS__);   \
+    if(maxlen < len){                                   \
+        return 1;                                       \
+    }                                                   \
+    maxlen -= len;                                      \
+    obuf += len;                                        \
+}while(0)
+
+
+extern double Beta_Function(double, double);
 
 typedef void *  (*policy_new)(multi_arm_t *, const char *option);
 typedef void    (*policy_free)(policy_t *);
 typedef void *  (*policy_choice)(policy_t *, multi_arm_t *, int *idx);
 typedef int     (*policy_reward)(policy_t *, multi_arm_t *, int idx, double reward);
-typedef int     (*policy_stat_json)(policy_t *, char *obuf, size_t maxlen);
+typedef int     (*policy_stat_json)(policy_t *, char *obuf, size_t maxlen); /* return a json string */
 
 #ifdef MABREDIS_MODULE
 typedef struct RedisModuleIO RedisModuleIO;
@@ -85,19 +96,44 @@ static policy_op_t policy_egreedy = {
 #endif
 };
 
-// record each arms win lose count
+/*Thomposen Sampling */
+/*record each arms win lose count
+*/
 struct alpha_beta_s {
     uint64_t    win;
     uint64_t    lose;
 };
 typedef struct alpha_beta_s alpha_beta_t;
 
-
 struct policy_ts_data_s {
-    uint64_t    size;
-    alpha_beta_t    arms[1];
+    int    len;
+    alpha_beta_t    *arms;
 };
 typedef struct policy_ts_data_s policy_ts_data_t;
+
+static void * policy_ts_new(multi_arm_t *, const char * option);
+static void   policy_ts_free(policy_t *);
+static void * policy_ts_choice(policy_t *, multi_arm_t *, int *idx);
+static int    policy_ts_reward(policy_t *, multi_arm_t *, int idx, double reward);
+static int    policy_ts_json(policy_t *, char *obuf, size_t maxlen);
+
+#ifdef MABREDIS_MODULE
+static void     policy_ts_save(policy_t *, RedisModuleIO *);
+static void *   policy_ts_load(policy_t* , RedisModuleIO *);
+#endif
+
+static policy_op_t policy_ts = {
+    .new = policy_ts_new,
+    .free = policy_ts_free,
+    .choice = policy_ts_choice,
+    .reward = policy_ts_reward,
+    .sj = policy_ts_json,
+
+#ifdef MABREDIS_MODULE
+    .save = policy_ts_save,
+    .load = policy_ts_load,
+#endif
+};
 
 struct policy_elem_s {
     const char      *name;
@@ -107,7 +143,8 @@ typedef struct policy_elem_s policy_elem_t;
 
 static policy_elem_t policies[] = {
     {"ucb1", &policy_ucb1},
-    {"egreedy", &policy_egreedy}
+    {"egreedy", &policy_egreedy},
+    {"thompsen", &policy_ts}
 };
 static int policy_init(multi_arm_t *, const char *policy, policy_t *dst, const char *option);
 
@@ -208,15 +245,6 @@ int
 multi_arm_stat_json(multi_arm_t *ma, char *obuf, size_t maxlen)
 {
     size_t     len;
-#define PRINTF(fmt, ...) do{                            \
-    len = snprintf(obuf, maxlen, fmt, ##__VA_ARGS__);   \
-    if(maxlen < len){                                   \
-        return 1;                                       \
-    }                                                   \
-    maxlen -= len;                                      \
-    obuf += len;                                        \
-}while(0)
-
 #define FMT "{\"count\": %lu, \"reward\": %f}"
 
     PRINTF("{\"total_count\": %lu, \"arms\": [", ma->total_count);
@@ -244,7 +272,7 @@ multi_arm_stat_json(multi_arm_t *ma, char *obuf, size_t maxlen)
         PRINTF("\"policy\": \"%s\"", ma->policy.name);
     }
     PRINTF("}");
-#undef PRINTF
+#undef FMT
 
     return 0;
 }
@@ -478,5 +506,135 @@ policy_egreedy_load(policy_t *p, RedisModuleIO *rdb)
 
     *ret = val;
     return ret;
+}
+#endif
+
+
+static void *
+policy_ts_new(multi_arm_t *m, const char * option)
+{
+    UNUSED(option);
+    policy_ts_data_t    *data = _malloc(sizeof(*data));
+    data->arms = _malloc(sizeof(alpha_beta_t) * m->len);
+    data->len =  m->len;
+
+    int     i;
+    for(i = 0; i < m->len; i++){
+        data->arms[i].win = 1;
+        data->arms[i].lose = 1;
+    }
+
+    return data;
+}
+
+static void
+policy_ts_free(policy_t *p)
+{
+    policy_ts_data_t *data = (policy_ts_data_t *)p->data;
+    _free(data->arms);
+    _free(data);
+}
+
+/* https://arxiv.org/pdf/1707.02038.pdf
+ */
+static void *
+policy_ts_choice(policy_t *p, multi_arm_t *m, int *idx)
+{
+    policy_ts_data_t    *data = (policy_ts_data_t *)p->data;
+    int            i, maxi = 0;
+    double              tmp, maxp = 0.0;
+
+    for(i = 0; i < data->len; i++){
+        tmp = Beta_Function((double)data->arms[i].win, (double)data->arms[i].lose);
+        if(tmp > maxp){
+            maxi = i;
+            maxp = tmp;
+        }
+    }
+
+    *idx = maxi;
+    return m->arms[i].choice;
+}
+
+static int
+policy_ts_reward(policy_t *p, multi_arm_t *m, int idx, double reward)
+{
+    policy_ts_data_t    *data = (policy_ts_data_t *)p->data;
+
+    if(reward != 0.0){
+        data->arms[idx].win += 1;
+    }else{
+        data->arms[idx].lose += 1;
+    }
+
+    arm_t   *arm = m->arms + idx;
+
+    arm->reward += reward;
+    arm->count++;
+
+    return 0;
+}
+
+static int
+policy_ts_json(policy_t *p, char *obuf, size_t maxlen)
+{
+    size_t      len;
+    char        *old = obuf;
+#define FMT "{\"idx\": %d, \"win\": %d, \"lose\": %d}"
+    const char  *fmt;
+    int         i;
+
+    PRINTF("\"alpha_beta\": [");
+    policy_ts_data_t *data = (policy_ts_data_t *)p->data;
+
+    for(i = 0; i < data->len; i++){
+        if(i + 1 == data->len){
+            fmt = FMT;
+        } else {
+            fmt = FMT",";
+        }
+
+        PRINTF(fmt, i, data->arms[i].win, data->arms[i].lose);
+    }
+
+    PRINTF("]");
+
+#undef FMT
+
+    return obuf - old;
+}
+
+#ifdef MABREDIS_MODULE
+
+static void
+policy_ts_save(policy_t *p, RedisModuleIO *io)
+{
+    policy_ts_data_t    *data = (policy_ts_data_t *)p->data;
+    int                 i;
+
+    RedisModule_SaveUnsigned(io, data->len);
+    for(i = 0; i < data->len; i++){
+        RedisModule_SaveUnsigned(io, data->arms[i].win);
+        RedisModule_SaveUnsigned(io, data->arms[i].lose);
+    }
+
+}
+
+static void *
+policy_ts_load(policy_t *p, RedisModuleIO *io)
+{
+    UNUSED(p);
+    policy_ts_data_t    *data = _malloc(sizeof(*data));
+
+    data->len = RedisModule_LoadUnsigned(io);
+    data->arms = _malloc(data->len * sizeof(alpha_beta_t));
+
+    int    i;
+    for(i = 0; i < data->len; i++){
+        data->arms[i].win = RedisModule_LoadUnsigned(io);
+        data->arms[i].lose = RedisModule_LoadUnsigned(io);
+    }
+
+    return data;
 }
 #endif
