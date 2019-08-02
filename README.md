@@ -1,7 +1,7 @@
 # mab-redis
 an redis module which implement multi-armed bandtis algorithm
 
-currently **ucb1**, **egreey(epsilon-greedy)** algorithm was implemented
+currently **ucb1**, **egreey(epsilon-greedy)**, **thompsen sampling** algorithm was implemented
 
 ## example
 ```python
@@ -47,6 +47,27 @@ print conn.execute_command("mab.statjson", "key-egreedy")
 
 conn.execute_command("del", "key-ucb1")
 conn.execute_command("del", "key-egreedy")
+
+ARM_RATES = (0.1, 0.3, 0.1)
+LOOP = 1000
+KEY = "key-ts"
+
+arms = ["%f" % i for i in ARM_RATES]
+conn = redis.StrictRedis()
+conn.execute_command("mab.set", KEY, "thompsen", len(arms), *arms)
+
+for i in range(0, LOOP):
+    idx, choice = conn.execute_command("mab.choice", KEY)
+
+    if random.random() < ARM_RATES[idx]:
+        reward = 0.1
+    else:
+        reward = 0.0
+    
+    conn.execute_command("mab.reward", KEY, idx, reward)
+
+conn.execute_command("del", KEY)
+
 ```
 
 ## command
@@ -58,7 +79,7 @@ init a mutli-armed bandit
 field|type|description
 ----|----|----
 key|string| identified a `bandit` uniquely
-type|string| the algorithm to choice arm. (`ucb1`, `egreedy`)
+type|string| the algorithm to choice arm. (`ucb1`, `egreedy`, `thompsen`)
 choice_num|integer| the number of bandit arms
 choiceN|string| 
 option||only set for `egreedy` algorithm. specific `epsilon` value
