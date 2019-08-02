@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <strings.h>
 
 #include "multiarm.h"
 #include "pcg.h"
@@ -373,7 +374,7 @@ policy_init(multi_arm_t *m, const char *policy, policy_t *dst, const char *optio
     int         i = 0, len = (int)(sizeof(policies)/sizeof(policies[0]));
 
     for(i = 0; i < len; i++){
-        if(strcmp(policies[i].name, policy) == 0){
+        if(strcasecmp(policies[i].name, policy) == 0){
             dst->op = policies[i].op;
             dst->name = policies[i].name;
             if(policies[i].op->new == NULL){
