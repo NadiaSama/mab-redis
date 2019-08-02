@@ -144,9 +144,13 @@ long double xGamma_Function(long double x)
              //    if x <= max_long_double_arg return Gamma(x)  //
              //    otherwise      return LDBL_MAX.              //
 
-   if ( x > 0.0L )
-      if (x <= max_long_double_arg) return xGamma(x);
-      else return LDBL_MAX;
+   if ( x > 0.0L ){
+      if (x <= max_long_double_arg){
+         return xGamma(x);
+      }else{
+         return LDBL_MAX;
+      }
+   }
 
                    // For a nonpositive argument (x <= 0) //
                    //    if x is a pole return LDBL_MAX   //
@@ -242,7 +246,6 @@ static long double Duplication_Formula( long double two_x )
 {
    long double x = 0.5L * two_x;
    long double g;
-   double two_n = 1.0;
    int n = (int) two_x - 1;
 
    g = powl(2.0L, two_x - 1.0L - (long double) n);

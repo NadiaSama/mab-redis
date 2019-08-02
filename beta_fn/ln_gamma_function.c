@@ -131,7 +131,6 @@ long double xLn_Gamma_Function(long double x)
 //     g = xlnGamma_Asymptotic_Expansion( x );                                //
 ////////////////////////////////////////////////////////////////////////////////
 
-static long double const pi = 3.14159265358979323846264338L;
 static const long double log_sqrt_2pi = 9.18938533204672741780329736e-1L;
 
 // Bernoulli numbers B(2),B(4),B(6),...,B(20).  Only B(2),...,B(6) currently //
@@ -148,8 +147,6 @@ static const long double B[] = {   1.0L / (long double)(6 * 2 * 1),
                                43867.0L / (long double)(796 * 18 * 17),
                              -174611.0L / (long double)(330 * 20 * 19) 
                            };
-
-static const int n = sizeof(B) / sizeof(long double);
 
 static long double xLnGamma_Asymptotic_Expansion( long double x ) {
    const int  m = 3;
