@@ -32,7 +32,7 @@ typedef void *  (*policy_new)(multi_arm_t *, const char *option);
 typedef void    (*policy_free)(policy_t *);
 typedef void *  (*policy_choice)(policy_t *, multi_arm_t *, int *idx);
 typedef int     (*policy_reward)(policy_t *, multi_arm_t *, int idx, double reward);
-typedef int     (*policy_stat_json)(policy_t *, char *obuf, size_t maxlen); /* return a json string */
+typedef int     (*policy_stat_json)(policy_t *, char *obuf, size_t maxlen); /* return a "key": val pair*/
 
 #ifdef MABREDIS_MODULE
 typedef struct RedisModuleIO RedisModuleIO;
