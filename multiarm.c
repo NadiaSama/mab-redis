@@ -6,7 +6,6 @@
 #include <stdlib.h>
 
 #include "multiarm.h"
-#include "incbeta.h"
 #include "pcg.h"
 #include "log.h"
 
@@ -24,7 +23,9 @@
 void Init_32_Uniform_0_1_Random_Variate( void (*init_rv)(unsigned long seed),  
                              unsigned long seed, double (*r_generator)(void),
                                          unsigned long (*i_generator)(void) );
+void Init_Exponential_Random_Variate(double (*)(void));
 extern double Beta_Random_Variate(double, double);
+extern double  Exponential_Variate_Inversion(void);
 
 typedef void *  (*policy_new)(multi_arm_t *, const char *option);
 typedef void    (*policy_free)(policy_t *);
@@ -179,6 +180,7 @@ multi_arm_init(malloc_ptr m, free_ptr f, realloc_ptr r)
 
     /* seed init by pgc32_srandom */
     Init_32_Uniform_0_1_Random_Variate(useless_init, 0, randnumber, NULL);
+    Init_Exponential_Random_Variate(Exponential_Variate_Inversion);
 
     return 0;
 }
@@ -547,8 +549,6 @@ policy_ts_free(policy_t *p)
     _free(data);
 }
 
-/* https://arxiv.org/pdf/1707.02038.pdf
- */
 static void *
 policy_ts_choice(policy_t *p, multi_arm_t *m, int *idx)
 {

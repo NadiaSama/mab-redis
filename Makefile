@@ -24,7 +24,8 @@ vpath %.c beta_fn
 mabredis.xo: redismodule.h
 multiarm.c: multiarm.h
 
-mabredis.so: mabredis.o multiarm.o pcg.o beta_random_variate.o exponential_random_variate.o gamma_random_variate.o uniform_0_1_random_variate.o
+mabredis.so: mabredis.o multiarm.o pcg.o \
+beta_random_variate.o exponential_random_variate.o gamma_random_variate.o uniform_0_1_random_variate.o exponential_variate_inversion.o
 	$(LD) -o $@ $^ $(SHOBJ_LDFLAGS) $(LIBS) -lc
 
 clean:
