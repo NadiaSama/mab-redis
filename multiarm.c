@@ -6,6 +6,7 @@
 #include <stdlib.h>
 
 #include "multiarm.h"
+#include "incbeta.h"
 #include "pcg.h"
 #include "log.h"
 
@@ -20,7 +21,10 @@
 }while(0)
 
 
-extern double Beta_Function(double, double);
+void Init_32_Uniform_0_1_Random_Variate( void (*init_rv)(unsigned long seed),  
+                             unsigned long seed, double (*r_generator)(void),
+                                         unsigned long (*i_generator)(void) );
+extern double Beta_Random_Variate(double, double);
 
 typedef void *  (*policy_new)(multi_arm_t *, const char *option);
 typedef void    (*policy_free)(policy_t *);
@@ -152,6 +156,10 @@ static malloc_ptr  _malloc = malloc;
 static free_ptr    _free = free;
 static realloc_ptr _realloc = realloc;
 
+static void useless_init(unsigned long seed){
+    UNUSED(seed);
+}
+
 int
 multi_arm_init(malloc_ptr m, free_ptr f, realloc_ptr r)
 {
@@ -168,6 +176,10 @@ multi_arm_init(malloc_ptr m, free_ptr f, realloc_ptr r)
     }
 
     pcg32_srandom(time(NULL) ^ (intptr_t)&printf, (intptr_t)&sprintf);
+
+    /* seed init by pgc32_srandom */
+    Init_32_Uniform_0_1_Random_Variate(useless_init, 0, randnumber, NULL);
+
     return 0;
 }
 
@@ -545,8 +557,8 @@ policy_ts_choice(policy_t *p, multi_arm_t *m, int *idx)
     double              tmp, maxp = 0.0;
 
     for(i = 0; i < data->len; i++){
-        tmp = Beta_Function((double)data->arms[i].win, (double)data->arms[i].lose);
-        log_dev("choice %d (%d %d) %f", i, data->arms[i].win, data->arms[i].lose, tmp);
+        tmp =  Beta_Random_Variate((double)data->arms[i].win, (double)data->arms[i].lose);
+        log_dev("choice %d (%ld %ld) %f", i, data->arms[i].win, data->arms[i].lose, tmp);
         if(tmp > maxp){
             maxi = i;
             maxp = tmp;
