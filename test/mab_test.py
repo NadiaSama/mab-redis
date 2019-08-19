@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import random
+import unittest
 import argparse
 import subprocess
 
@@ -13,7 +14,7 @@ REDIS_CONF = "mab_test.conf"
 REDIS_ADDR = "/tmp/mab_test.sock"
 
 class RedisServer:
-    def __init__(self, executable, module):
+    def __init__(self, executable, module, *options):
 
         path = os.path.abspath(executable)
         if not os.path.exists(path):
@@ -21,10 +22,13 @@ class RedisServer:
 
         self.__cmd = [path, REDIS_CONF, "--loadmodule", module]
         self.__srv = None
+        self.__op = options
 
     def start(self):
-        self.__srv = subprocess.Popen(self.__cmd, stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        cmd = (*self.__cmd, *self.__op)
+        self.__srv = subprocess.Popen(cmd,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
 
         retcode = self.__srv.poll()
         if retcode != None:
@@ -98,62 +102,62 @@ class ThompsenCmd(MabCmd):
     TYPE = "thompsen"
 
 
-#restart redis server
-#test dump.rdb serialize
-def test_rdb(srv):
-    cmds = (
-        EgreedyCmd(("choice1", "choice2", "choice3"), 0.1),
-        Ucb1Cmd(("choice1, choice2", "choice3", "choice4")),
-        ThompsenCmd(("choice1", "choice2", "choice3"))
-    )
+class MabTest(unittest.TestCase):
+    REDIS_EXE = None
+    REDIS_MODULE = None
 
-    oldstats = []
-    for cmd in cmds:
-        for _ in range(0, 1000):
-            cmd.exec()
+    @classmethod
+    def redis_server(cls, *options):
+        return RedisServer(cls.REDIS_EXE, cls.REDIS_MODULE, *options)
 
-        oldstats.append(cmd.statjson())
+    def test_mab_rdb(self):
+        rdbfile = "mabredis.rdb"
+        self.__test_persistence("--save", "900", "1", "--dbfilename", rdbfile)
+        os.remove(rdbfile)
 
-    # restart server
-    srv.restart()
+    def test_mab_aof(self):
+        aoffile = "mabredis.aof"
+        self.__test_persistence("--appendonly", "yes", "--appendfilename", aoffile)
+        os.remove(aoffile)
 
-    newstats = []
-    for cmd in cmds:
-        newstats.append(cmd.statjson())
-        cmd.clean()
+    def __test_persistence(self, *options):
+        server = self.redis_server(*options)
+        server.start()
 
-    for i in range(0, len(oldstats)):
-        if oldstats[i] != newstats[i]:
-            raise ValueError("RDB TEST FAIL!")
+        cmds = (
+            EgreedyCmd(("choice1", "choice2", "choice3"), 0.1),
+            Ucb1Cmd(("choice1, choice2", "choice3", "choice4")),
+            ThompsenCmd(("choice1", "choice2", "choice3"))
+        )
 
-    print("TEST OK!")
+        oldstats = []
+        for cmd in cmds:
+            for _ in range(0, 1000):
+                cmd.exec()
+            oldstats.append(cmd.statjson())
 
-def test_cmd(srv):
-    cmd = EgreedyCmd(("choice1", "choice2", "choice3"), 0.12)
-    for _ in  range(0, 1000):
-        cmd.exec()
+        #restart server to reload data
+        server.restart()
 
-    cmd.info()
+        newstats = []
+        for cmd in cmds:
+            newstats.append(cmd.statjson())
+            cmd.clean()
+
+        for i in range(0, len(oldstats)):
+            self.assertEqual(oldstats[i],newstats[i])
+
+        server.stop()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    #path to redis executable
+    MabTest.REDIS_EXE = "../../redis-5.0.5/src/redis-server"
+    #path to mab redis module
+    MabTest.REDIS_MODULE = "../mabredis.so" 
 
-    parser.add_argument("--redis", type=str, required=True, help="specific redis-server path")
-    parser.add_argument("--mab", type=str, required=True, help="specific mabredis.so path")
-    parser.add_argument("--count", type=int, default=1000, help="specific test loop count")
-    conf = parser.parse_args()
+    if not os.path.exists(MabTest.REDIS_EXE) or not os.path.exists(MabTest.REDIS_MODULE):
+        print("edit REDIS_EXE and REDIS_MODULE at first")
+        sys.exit(1)
 
-    srv = RedisServer(conf.redis, conf.mab)
-    srv.start()
-
-    try:
-        test_rdb(srv)
-        test_cmd(srv)
-    except IOError as e:
-        pass
-
-    srv.stop()
-
-    print("server stop")
+    unittest.main()
