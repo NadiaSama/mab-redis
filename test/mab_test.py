@@ -67,7 +67,6 @@ class MabCmd:
 
     def exec(self):
         idx, _ = self._conn.execute_command("mab.choice", self._key)
-        print("got {}".format(idx))
         #if random.random() < self._rates[idx]:
         self._conn.execute_command("mab.reward", self._key, idx, 0.1)
     
@@ -99,7 +98,9 @@ class ThompsenCmd(MabCmd):
     TYPE = "thompsen"
 
 
-def test(srv, loop):
+#restart redis server
+#test dump.rdb serialize
+def test_rdb(srv):
     cmds = (
         EgreedyCmd(("choice1", "choice2", "choice3"), 0.1),
         Ucb1Cmd(("choice1, choice2", "choice3", "choice4")),
@@ -108,27 +109,31 @@ def test(srv, loop):
 
     oldstats = []
     for cmd in cmds:
-        for _ in range(0, loop):
+        for _ in range(0, 1000):
             cmd.exec()
 
         oldstats.append(cmd.statjson())
 
-    #restart redis server
-    #test dump.rdb serialize
+    # restart server
     srv.restart()
 
     newstats = []
     for cmd in cmds:
         newstats.append(cmd.statjson())
+        cmd.clean()
 
-    print(oldstats)
-    print(newstats)
     for i in range(0, len(oldstats)):
         if oldstats[i] != newstats[i]:
             raise ValueError("RDB TEST FAIL!")
 
     print("TEST OK!")
 
+def test_cmd(srv):
+    cmd = EgreedyCmd(("choice1", "choice2", "choice3"), 0.12)
+    for _ in  range(0, 1000):
+        cmd.exec()
+
+    cmd.info()
 
 
 if __name__ == "__main__":
@@ -144,7 +149,8 @@ if __name__ == "__main__":
     srv.start()
 
     try:
-        test(srv, conf.count)
+        test_rdb(srv)
+        test_cmd(srv)
     except IOError as e:
         pass
 
